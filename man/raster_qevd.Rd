@@ -15,7 +15,7 @@ raster_qevd(x, p, evd_mod_str, interval = NULL, lower.tail = TRUE)
 
 \item{interval}{A length two vector containing the end-points of the interval to be searched for the quantiles, passed to the uniroot function.}
 
-\item{lower.tail}{Logical; if TRUE (default), probabilities are P (X <= x), otherwise P (X > x).}
+\item{lower.tail}{Logical; if TRUE (default), probabilities are P \eqn{x \le y}), otherwise P (X > x).}
 }
 \value{
 gives the quantile function corresponding to p

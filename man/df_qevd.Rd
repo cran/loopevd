@@ -2,31 +2,26 @@
 % Please edit documentation in R/loopFuns.R
 \name{df_qevd}
 \alias{df_qevd}
-\title{Return a data.frame of EVD Quantiles}
+\title{Return a vector of EVD Quantiles}
 \usage{
-df_qevd(x, p, evd_mod_str, interval = NULL, lower.tail = TRUE)
+df_qevd(x, p, evd_mod_str, interval = NULL, lower.tail = TRUE, cores = 1)
 }
 \arguments{
-\item{x}{data.frame of EVD parameters, e.g. loc, scale, shape}
+\item{x}{A data.frame of EVD parameters}
 
-\item{p}{probability value.}
+\item{p}{Probability value (e.g. 0.99)}
 
-\item{evd_mod_str}{either a string "fgumbel", "fgev" or "fgumbelx" from the extreme value distribution (evd) in the evd package}
+\item{evd_mod_str}{One of "fgumbel", "fgev", or "fgumbelx"}
 
-\item{interval}{A length two vector containing the end-points of the interval to be searched for the quantiles, passed to the uniroot function.}
+\item{interval}{Optional; interval passed to uniroot when needed}
 
-\item{lower.tail}{Logical; if TRUE (default), probabilities are P (X <= x), otherwise P (X > x).}
+\item{lower.tail}{Logical; if TRUE (default), computes P(\eqn{x \le y})}
+
+\item{cores}{Number of cores to use for parallel processing (default is 1)}
 }
 \value{
-gives the quantile function corresponding to p
+A numeric vector of quantiles
 }
 \description{
-Return a data.frame of EVD Quantiles
-}
-\examples{
-df = data.frame(loc = 1,scale = 0.5)
-qevd_vector(df,1-0.05,"fgumbel")
-}
-\seealso{
-\code{\link[evd:gev]{evd::qgev()}}, \code{\link[evd:gumbelx]{evd::qgumbelx()}}
+Return a vector of EVD Quantiles
 }

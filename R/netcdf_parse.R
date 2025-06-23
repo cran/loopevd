@@ -113,7 +113,7 @@ df_to_netcdf <- function(df, output_file, lat_var = "lat", lon_var = "lon",
   df <- df[, !(names(df) %in% c(lat_var, lon_var))]
 
   # Define dimensions
-  dim_station <- ncdf4::ncdim_def("station", "station index", seq_len(nrow(df)))
+  dim_station <- ncdf4::ncdim_def("station", "station index", seq_len(nrow(df))-1)
 
   # Define variables
   var_list <- list(

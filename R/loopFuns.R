@@ -428,7 +428,7 @@ annual_max = function(DF,record_attribute = "sea_level"){
 #' @param p vector of probabilities.
 #' @param evd_mod_str either a string "fgumbel", "fgev" or "fgumbelx" from the extreme value distribution (evd) in the evd package
 #' @param interval A length two vector containing the end-points of the interval to be searched for the quantiles, passed to the uniroot function.
-#' @param lower.tail Logical; if TRUE (default), P (X <= x), otherwise P (X > x).
+#' @param lower.tail Logical; if TRUE (default), P (\eqn{x \le y}), otherwise P (X > x).
 #' @param nams names of the values of x (optional)
 #' @return gives the quantile function corresponding to p
 #' @export
@@ -471,7 +471,7 @@ qevd_vector = function(x,p,evd_mod_str,interval = NULL,lower.tail = TRUE,nams = 
 #' @param p probability value.
 #' @param evd_mod_str either a string "fgumbel", "fgev" or "fgumbelx" from the extreme value distribution (evd) in the evd package
 #' @param interval A length two vector containing the end-points of the interval to be searched for the quantiles, passed to the uniroot function.
-#' @param lower.tail Logical; if TRUE (default), probabilities are P (X <= x), otherwise P (X > x).
+#' @param lower.tail Logical; if TRUE (default), probabilities are P \eqn{x \le y}), otherwise P (X > x).
 #' @return gives the quantile function corresponding to p
 #' @export
 #'
@@ -491,24 +491,159 @@ raster_qevd = function(x,p,evd_mod_str,interval = NULL,lower.tail = TRUE){
 }
 
 
-#' Return a data.frame of EVD Quantiles
+#' Return a vector of EVD Quantiles
 #'
-#' @param x data.frame of EVD parameters, e.g. loc, scale, shape
-#' @param p probability value.
-#' @param evd_mod_str either a string "fgumbel", "fgev" or "fgumbelx" from the extreme value distribution (evd) in the evd package
-#' @param interval A length two vector containing the end-points of the interval to be searched for the quantiles, passed to the uniroot function.
-#' @param lower.tail Logical; if TRUE (default), probabilities are P (X <= x), otherwise P (X > x).
-#' @return gives the quantile function corresponding to p
+#' @param x A data.frame of EVD parameters
+#' @param p Probability value (e.g. 0.99)
+#' @param evd_mod_str One of "fgumbel", "fgev", or "fgumbelx"
+#' @param interval Optional; interval passed to uniroot when needed
+#' @param lower.tail Logical; if TRUE (default), computes P(\eqn{x \le y})
+#' @param cores Number of cores to use for parallel processing (default is 1)
+#'
+#' @return A numeric vector of quantiles
+#' @importFrom parallel makeCluster clusterExport parLapply clusterEvalQ stopCluster
 #' @export
-#'
-#' @seealso [evd::qgev()], [evd::qgumbelx()]
-#'
-#' @examples
-#' df = data.frame(loc = 1,scale = 0.5)
+#' @example
+#' df <- data.frame(loc = 1,scale = 0.5)
 #' qevd_vector(df,1-0.05,"fgumbel")
-df_qevd = function(x,p,evd_mod_str, interval = NULL,lower.tail = TRUE){
-  if(class(x) != class(data.frame())) stop("x must be a data.frame")
-  if(length(p) > 1) stop("provide one value p")
-  out = apply(X = x,MARGIN = 1,FUN = loopevd::qevd_vector, p = p, evd_mod_str = evd_mod_str,interval=interval,lower.tail=lower.tail)
-  out
+df_qevd <- function(x, p, evd_mod_str, interval = NULL, lower.tail = TRUE, cores = 1) {
+  if (!is.data.frame(x)) stop("x must be a data.frame")
+  if (length(p) != 1) stop("provide one value for p")
+
+  if (cores > 1) {
+    cl <- makeCluster(cores)
+    clusterExport(cl, varlist = c("x", "p", "evd_mod_str", "interval", "lower.tail", "qevd_vector"), envir = environment())
+    clusterEvalQ(cl, library(loopevd))
+
+    out <- parLapply(cl, 1:nrow(x), function(i) {
+      tryCatch(
+        qevd_vector(x[i, ], p = p, evd_mod_str = evd_mod_str, interval = interval, lower.tail = lower.tail),
+        error = function(e) {
+          message(sprintf("Error in row %d: %s", i, e$message))
+          return(NA)
+        }
+      )
+    })
+
+    stopCluster(cl)
+    return(as.numeric(out))
+  } else {
+    out <- apply(X = x, MARGIN = 1, FUN = loopevd::qevd_vector,
+                 p = p, evd_mod_str = evd_mod_str, interval = interval, lower.tail = lower.tail)
+    return(out)
+  }
+}
+
+#' Internal function to compute EVD quantile confidence intervals
+#'
+#' @param xrow A single-row data.frame of EVD parameters and covariance matrix
+#' @param p Probability value (e.g. 0.99)
+#' @param ci Confidence level (default 0.95)
+#'
+#' @return Numeric vector of confidence interval width(s)
+#' @keywords internal
+#'
+#' @example
+#' xrow <- data.frame(loc = 1, scale = 0.5,
+#'       cov_1 = 0.01, cov_2 = 0.001, cov_3 = 0.002,
+#'       cov_4 = 0.001)
+#' cievd_vector(xrow,1-0.1,0.95)
+#' xrow <- data.frame(loc = 1,cale = 0.5,shape = .01,
+#'     cov_1 = 0.01, cov_2 = 0.001, cov_3 = 0.002,
+#'     cov_4 = 0.001, cov_5 = 0.01,  cov_6 = 0.001,
+#'     cov_7 = 0.002, cov_8 = 0.001, cov_9 = 0.02
+#'     )
+#' cievd_vector(xrow,1-0.1,0.95)
+cievd_vector <- function(xrow, p, ci = 0.95) {
+  if (!is.data.frame(xrow)) xrow <- as.data.frame(xrow)
+  if (is.na(xrow[[1]])) return(NA)
+
+  if(!any(names(xrow) == "shape")) a <- matrix(as.numeric(xrow[c("loc", "scale")]))
+  if( any(names(xrow) == "shape")) a <- as.numeric(xrow[, c("loc", "scale", "shape")])
+  cov_idx <- which(substr(names(xrow), 1, 3) == "cov")
+
+  if (length(cov_idx) == 0 || (sqrt(length(cov_idx)) %% 1 != 0)) {
+    stop("Covariance matrix elements not found or malformed")
+  }
+
+  sqncov <- sqrt(length(cov_idx))
+  mat <- matrix(as.numeric(xrow[, cov_idx]), nrow = sqncov, ncol = sqncov)
+
+  if(!any(names(xrow) == "shape")){
+    a[3] = 0
+    eps = 1e-06
+    a1 <- a
+    a2 <- a
+    a1[1] <- a[1] + eps
+    a2[2] <- a[2] + eps
+    q <- ismev::gevq(a, 1 - p)
+    d1 <- (ismev::gevq(a1, 1 - p) - q)/eps
+    d2 <- (ismev::gevq(a2, 1 - p) - q)/eps
+    d <- cbind(d1, d2)
+  }
+  if( any(names(xrow) == "shape")) d <- t(ismev::gev.rl.gradient(a = matrix(a), p = 1 - p))
+  v <- apply(d, 1, ismev::q.form, m = mat)
+  z <- stats::qnorm(1 - (1 - ci) / 2)
+  cv <- z * sqrt(v)
+
+  return(cv)
+}
+
+#' Return a numeric vector of confidence intervals for EVD quantiles
+#'
+#' @param x A data.frame of EVD parameters and associated covariance matrix. Must include 'loc', 'scale', 'shape', and 'cov*' column names.
+#' @param p A single probability value for the quantile (e.g. 0.99).
+#' @param ci Confidence level for the interval (default is 0.95).
+#' @param cores Number of parallel cores to use. If >1, parallel processing is used via \code{parallel::parLapply()}.
+#'
+#' @return A numeric vector giving the confidence interval widths for each row in \code{x}.
+#'
+#' @details This function calculates confidence intervals for extreme value quantiles using the delta method. The required input is a row-wise data frame with EVD parameters and their variance-covariance elements.
+#' Internally uses \code{ismev::gev.rl.gradient()} and \code{ismev::q.form()}.
+#'
+#' @seealso [ismev::gev.rl.gradient()], [ismev::q.form()]
+#' @export
+#' @importFrom parallel makeCluster clusterExport parLapply clusterEvalQ stopCluster
+#' @examples
+#' \dontrun{
+#'   df <- data.frame(loc = 1, scale = 0.5, shape = 0.1,
+#'                    cov_1 = 0.01, cov_2 = 0.001, cov_3 = 0.002,
+#'                    cov_4 = 0.001, cov_5 = 0.01, cov_6 = 0.001,
+#'                    cov_7 = 0.002, cov_8 = 0.001, cov_9 = 0.02)
+#'   df_cievd(df, p = 0.99, ci = 0.95, cores = 2)
+#' }
+#'
+df_cievd <- function(x, p, ci = 0.95, cores = 8) {
+  if (!is.data.frame(x)) stop("x must be a data.frame")
+  if (length(p) != 1) stop("p must be a single value")
+
+  if (cores > 1) {
+    cl <- makeCluster(cores)
+    clusterExport(cl, varlist = c("x", "p", "ci", "cievd_vector"), envir = environment())
+    clusterEvalQ(cl, library(ismev))
+
+    result <- parLapply(cl, 1:nrow(x), function(i) {
+      tryCatch(
+        cievd_vector(x[i, ], p, ci),
+        error = function(e) {
+          message(sprintf("Error in row %d: %s", i, e$message))
+          return(NA)
+        }
+      )
+    })
+
+    stopCluster(cl)
+  } else {
+    result <- lapply(1:nrow(x), function(i) {
+      tryCatch(
+        cievd_vector(x[i, ], p, ci),
+        error = function(e) {
+          message(sprintf("Error in row %d: %s", i, e$message))
+          return(NA)
+        }
+      )
+    })
+  }
+
+  return(as.numeric(result))
 }
